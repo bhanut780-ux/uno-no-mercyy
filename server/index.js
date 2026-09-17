@@ -36,9 +36,11 @@ const io = new Server(server, {
     origin: [
       "http://localhost:3000",
       "http://localhost:5173",
+      "https://uno-no-mercy.vercel.app",
       /\.vercel\.app$/,
     ],
     methods: ["GET", "POST"],
+    credentials: true,
   },
 });
 
