@@ -31,7 +31,16 @@ const PORT = Number(process.env.PORT) || 3000;
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
+const io = new Server(server, {
+  cors: {
+    origin: [
+      "http://localhost:3000",
+      "http://localhost:5173",
+      /\.vercel\.app$/,
+    ],
+    methods: ["GET", "POST"],
+  },
+});
 
 app.use(express.static(path.join(__dirname, "../public")));
 app.get("/api/info", (_req, res) => {

@@ -1,4 +1,8 @@
-const socket = io();
+// In production, connect to the Railway backend; locally, connect to same origin
+const BACKEND_URL = window.location.hostname === 'localhost'
+  ? ''
+  : (window.__UNO_BACKEND || 'https://uno-no-mercy-production.up.railway.app');
+const socket = io(BACKEND_URL);
 
 const $ = (id) => document.getElementById(id);
 const screens = {
