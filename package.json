@@ -1,0 +1,19 @@
+{
+  "name": "uno-no-mercy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Play UNO Show 'Em No Mercy with friends in the browser",
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test server/game.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1"
+  }
+}
