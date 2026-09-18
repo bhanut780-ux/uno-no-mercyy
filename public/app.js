@@ -1,8 +1,5 @@
-// In production, connect to the Railway backend; locally, connect to same origin
-const BACKEND_URL = window.location.hostname === 'localhost'
-  ? ''
-  : 'https://uno-no-mercyy-production.up.railway.app';
-const socket = io(BACKEND_URL);
+// Connect to same origin — Railway serves both static files and Socket.IO
+const socket = io();
 
 const $ = (id) => document.getElementById(id);
 const screens = {
@@ -41,6 +38,30 @@ $("code-input").addEventListener("keydown", (e) => {
   if (e.key === "Enter") $("btn-join").click();
 });
 $("btn-rules").onclick = () => $("rules").classList.remove("hidden");
+if ($("btn-rules-game")) $("btn-rules-game").onclick = () => $("rules").classList.remove("hidden");
+if ($("link-rules")) $("link-rules").onclick = (e) => { e.preventDefault(); $("rules").classList.remove("hidden"); };
+if ($("link-about")) $("link-about").onclick = (e) => { e.preventDefault(); $("rules").classList.remove("hidden"); };
+if ($("link-help")) $("link-help").onclick = (e) => { e.preventDefault(); $("rules").classList.remove("hidden"); };
+if ($("btn-close-chat")) $("btn-close-chat").onclick = () => $("side-panel").classList.remove("open");
+
+let soundEnabled = true;
+if ($("btn-sound-toggle")) {
+  $("btn-sound-toggle").onclick = () => {
+    soundEnabled = !soundEnabled;
+    $("btn-sound-toggle").textContent = soundEnabled ? "🔊" : "🔇";
+    toast(soundEnabled ? "Sound enabled" : "Sound muted");
+  };
+}
+
+document.querySelectorAll(".room-quick-join").forEach((btn) => {
+  btn.onclick = () => {
+    saveName();
+    const code = btn.dataset.code;
+    $("code-input").value = code;
+    socket.emit("joinRoom", { name: myName, code });
+  };
+});
+
 $("close-rules").onclick = () => $("rules").classList.add("hidden");
 $("rules").addEventListener("click", (e) => {
   if (e.target.id === "rules") $("rules").classList.add("hidden");
@@ -134,15 +155,56 @@ function renderLobby(s) {
   $("btn-start").disabled = !host || s.players.length < 2;
   $("btn-bot").disabled = !host || s.players.length >= 6;
   $("lan-hint").textContent = host ? "Share the code. Same Wi‑Fi friends can open the link." : "Waiting for host…";
-  fetch("/api/info")
-    .then((r) => r.json())
-    .then(({ urls }) => {
-      const extra = urls.filter((u) => !u.includes("localhost"));
-      if (extra.length) {
-        $("lan-hint").textContent = `On this Wi‑Fi: ${extra[0]}/?room=${s.code}`;
-      }
+  if (window.location.hostname === 'localhost') {
+    fetch("/api/info")
+      .then((r) => r.json())
+      .then(({ urls }) => {
+        const extra = urls.filter((u) => !u.includes("localhost"));
+        if (extra.length) {
+          $("lan-hint").textContent = `On this Wi‑Fi: ${extra[0]}/?room=${s.code}`;
+        }
+      })
+      .catch(() => {});
+  } else {
+    const shareUrl = `${location.origin}/?room=${s.code}`;
+    $("lan-hint").textContent = host ? `Share: ${shareUrl}` : "Waiting for host…";
+  }
+}
+
+let matchStartTime = null;
+let timerInterval = null;
+
+function updateMatchTimer(s) {
+  if (s.phase === "playing" && !matchStartTime) {
+    matchStartTime = Date.now();
+    if (!timerInterval) {
+      timerInterval = setInterval(() => {
+        if (!matchStartTime) return;
+        const elapsed = Math.floor((Date.now() - matchStartTime) / 1000);
+        const mins = String(Math.floor(elapsed / 60)).padStart(2, "0");
+        const secs = String(elapsed % 60).padStart(2, "0");
+        const timerEl = $("match-timer");
+        if (timerEl) timerEl.textContent = `${mins}:${secs}`;
+      }, 1000);
+    }
+  } else if (s.phase === "gameOver") {
+    matchStartTime = null;
+  }
+}
+
+function renderTopScores(s) {
+  const el = $("top-scores");
+  if (!el) return;
+  el.innerHTML = s.players
+    .map((p) => {
+      const isMe = p.id === s.you;
+      const isTurn = p.id === s.currentPlayerId;
+      return `<div class="score-item ${isTurn ? "turn" : ""}">
+        <span class="score-name">${isMe ? "You" : escapeHtml(p.name)}</span>
+        <span class="score-val">${p.eliminated ? "OUT" : p.cardCount}</span>
+      </div>`;
     })
-    .catch(() => {});
+    .join("");
 }
 
 function renderGame(s, prev) {
@@ -156,7 +218,17 @@ function renderGame(s, prev) {
   $("draw-count").textContent = s.drawCount;
   $("draw-pile").classList.toggle("can-draw", myTurn);
   $("draw-pile").title = s.stackAmount && myTurn ? `Take +${s.stackAmount}` : "Draw";
-  $("dir-arrow").classList.toggle("ccw", s.direction < 0);
+
+  // Direction arrows SVG
+  const dirSvg = $("dir-arrows-svg");
+  if (dirSvg) {
+    dirSvg.classList.toggle("ccw", s.direction < 0);
+  }
+  const dirArrowOld = $("dir-arrow");
+  if (dirArrowOld) {
+    dirArrowOld.classList.toggle("ccw", s.direction < 0);
+  }
+
   $("color-chip").className = `color-chip ${s.currentColor || ""}`;
   $("stack-badge").classList.toggle("hidden", !s.stackAmount);
   $("stack-badge").textContent = `+${s.stackAmount}`;
@@ -180,6 +252,9 @@ function renderGame(s, prev) {
           : "No Mercy coin";
     $("btn-coin").disabled = coin.used || (s.phase === "playing" && s.currentPlayerId !== s.you && s.pending?.playerId !== s.you);
   }
+
+  updateMatchTimer(s);
+  renderTopScores(s);
 
   renderOpponents(s, me);
   renderDiscard(s.topCard);
@@ -230,23 +305,30 @@ function renderOpponents(s, me) {
   const others = s.players.filter((p) => p.id !== s.you);
   $("opponents").innerHTML = others
     .map((p) => {
-      const backs = Math.min(p.cardCount, 7);
+      const backs = Math.min(p.cardCount, 6);
       const cards = Array.from({ length: backs }, (_, i) => {
-        const r = (i - backs / 2) * 8;
+        const r = (i - (backs - 1) / 2) * 8;
         return `<div class="card-back tiny" style="--r:${r}deg"></div>`;
       }).join("");
+
+      const initials = p.bot ? "🤖" : (p.name ? p.name.slice(0, 2).toUpperCase() : "P");
+      const isTurn = p.id === s.currentPlayerId;
+
       const catchBtn =
         s.unoVulnerable === p.id && !me?.eliminated
           ? `<button class="catch" data-catch="${p.id}">CATCH UNO</button>`
           : "";
-      return `<article class="seat ${p.id === s.currentPlayerId ? "turn" : ""} ${p.eliminated ? "out" : ""}">
-        <div class="nm">${escapeHtml(p.name)}${p.bot ? " 🤖" : ""}</div>
-        <div class="meta">${p.eliminated ? "OUT" : `${p.cardCount} cards`}${p.calledUno ? " · UNO" : ""}</div>
+
+      return `<article class="seat ${isTurn ? "turn" : ""} ${p.eliminated ? "out" : ""}">
+        <div class="avatar">${initials}</div>
+        <div class="nm" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</div>
+        <div class="card-badge">${p.eliminated ? "OUT" : `🂠 ${p.cardCount}`}${p.calledUno ? " · UNO" : ""}</div>
         <div class="mini-hand">${cards}</div>
         ${catchBtn}
       </article>`;
     })
     .join("");
+
   $("opponents").querySelectorAll("[data-catch]").forEach((btn) => {
     btn.onclick = () => socket.emit("catchUno", { playerId: btn.dataset.catch });
   });

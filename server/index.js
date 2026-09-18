@@ -36,7 +36,7 @@ const io = new Server(server, {
     origin: [
       "http://localhost:3000",
       "http://localhost:5173",
-      "https://uno-no-mercy.vercel.app",
+      /\.railway\.app$/,
       /\.vercel\.app$/,
     ],
     methods: ["GET", "POST"],
@@ -164,8 +164,6 @@ function applyDecision(room, bot, decision) {
       useCoin(room, bot.id);
       break;
     case "callUno":
-      callUno(room, bot.id);
-      break;
       callUno(room, bot.id);
       break;
     default:
